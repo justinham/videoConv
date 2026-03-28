@@ -129,7 +129,8 @@ def process():
         
         return jsonify({
             'success': True,
-            'output_file': f"{filename}_output.mp4"
+            'output_file': f"{filename}_output.mp4",
+            'size': file_size
         })
         
     except subprocess.TimeoutExpired:

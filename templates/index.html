@@ -138,9 +138,11 @@
                 submitBtn.disabled = false;
                 
                 if (response.ok && data.success) {
+                    const sizeMB = (data.size / 1024 / 1024).toFixed(2);
                     result.innerHTML = `
                         <h3>✅ Processing Complete!</h3>
                         <p>Your video is ready for download:</p>
+                        <p class="file-size">📦 ${sizeMB} MB</p>
                         <a href="/download/${data.output_file}" class="download-btn" download>
                             ⬇️ Download Video
                         </a>
