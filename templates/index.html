@@ -148,8 +148,51 @@
                         </a>
                     `;
                     result.classList.remove('hidden');
-                    // Refresh page to show new history item
-                    setTimeout(() => location.reload(), 1500);
+                    
+                    // Dynamically add to history without reload
+                    const historyList = document.getElementById('historyList');
+                    const emptyMsg = historyList.querySelector('.empty-history');
+                    if (emptyMsg) emptyMsg.remove();
+                    
+                    const now = new Date();
+                    const timestamp = now.toISOString().replace('T', ' ').slice(0, 19);
+                    const hwLabel = form.querySelector('input[name="hardware"]:checked').value;
+                    const hwIcon = hwLabel === 'cpu' ? '🖥️ CPU' : hwLabel === 'mac' ? '🍎 Mac GPU' : '🎮 NVIDIA GPU';
+                    const resolution = form.querySelector('#resolution').value;
+                    
+                    const newItem = document.createElement('div');
+                    newItem.className = 'history-item';
+                    newItem.dataset.filename = data.output_file;
+                    newItem.innerHTML = `
+                        <div class="history-info">
+                            <div class="history-name">${form.querySelector('#video').files[0]?.name || 'video'}</div>
+                            <div class="history-details">
+                                ${resolution} • ${form.querySelector('#fps').value} FPS • ${hwIcon} • ${sizeMB} MB • ${timestamp}
+                            </div>
+                        </div>
+                        <div class="history-actions">
+                            <a href="/download/${data.output_file}" class="btn-download" download>⬇️ Download</a>
+                            <button type="button" class="btn-delete" data-filename="${data.output_file}">🗑️</button>
+                        </div>
+                    `;
+                    historyList.insertBefore(newItem, historyList.firstChild);
+                    
+                    // Re-attach delete handler to new item
+                    newItem.querySelector('.btn-delete').addEventListener('click', async () => {
+                        const filename = newItem.dataset.filename;
+                        if (!confirm('Delete this video?')) return;
+                        try {
+                            const resp = await fetch(`/delete/${filename}`, { method: 'POST' });
+                            if (resp.ok) {
+                                newItem.remove();
+                                if (historyList.children.length === 0) {
+                                    historyList.innerHTML = '<p class="empty-history">No videos processed yet</p>';
+                                }
+                            }
+                        } catch (err) {
+                            alert('Delete failed: ' + err.message);
+                        }
+                    });
                 } else {
                     error.textContent = data.error || 'An error occurred';
                     error.classList.remove('hidden');
