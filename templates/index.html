@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Processor</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Video Processor</h1>
+        <p class="subtitle">Change resolution and FPS with GPU acceleration</p>
+        
+        <form id="uploadForm" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="video">Upload Video</label>
+                <input type="file" id="video" name="video" accept="video/*" required>
+            </div>
+            
+            <div class="form-group">
+                <label>Target Resolution</label>
+                <select name="resolution" id="resolution" required>
+                    <option value="1920x1080">1920x1080 (1080p)</option>
+                    <option value="1280x720">1280x720 (720p)</option>
+                    <option value="854x480">854x480 (480p)</option>
+                    <option value="640x360">640x360 (360p)</option>
+                    <option value="360x640">360x640 (Portrait)</option>
+                    <option value="1920x1080" selected>1920x1080 (1080p)</option>
+                    <option value="2560x1440">2560x1440 (1440p)</option>
+                    <option value="3840x2160">3840x2160 (4K)</option>
+                </select>
+                <small>Scale filter preserves aspect ratio</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="fps">Target FPS</label>
+                <input type="number" id="fps" name="fps" value="30" min="1" max="240" required>
+                <small>Frames per second (1-240)</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Hardware Acceleration</label>
+                <div class="radio-group">
+                    <label class="radio-option">
+                        <input type="radio" name="hardware" value="cpu" checked>
+                        <span class="radio-label">🖥️ CPU</span>
+                        <small>libx264 — Best compression, slower</small>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="hardware" value="mac">
+                        <span class="radio-label">🍎 Mac GPU</span>
+                        <small>h264_videotoolbox — Fast, larger files</small>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="hardware" value="nvidia">
+                        <span class="radio-label">🎮 NVIDIA GPU</span>
+                        <small>h264_nvenc — Fast, requires NVIDIA</small>
+                    </label>
+                </div>
+            </div>
+            
+            <button type="submit" id="submitBtn">Process Video</button>
+        </form>
+        
+        <div id="progress" class="hidden">
+            <div class="spinner"></div>
+            <p>Processing video...</p>
+            <p class="progress-note">This may take a while for large files</p>
+        </div>
+        
+        <div id="result" class="hidden"></div>
+        
+        <div id="error" class="hidden"></div>
+    </div>
+    
+    <script>
+        const form = document.getElementById('uploadForm');
+        const progress = document.getElementById('progress');
+        const result = document.getElementById('result');
+        const error = document.getElementById('error');
+        const submitBtn = document.getElementById('submitBtn');
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Reset
+            result.classList.add('hidden');
+            error.classList.add('hidden');
+            progress.classList.remove('hidden');
+            submitBtn.disabled = true;
+            
+            const formData = new FormData(form);
+            
+            try {
+                const response = await fetch('/process', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                progress.classList.add('hidden');
+                submitBtn.disabled = false;
+                
+                if (response.ok && data.success) {
+                    result.innerHTML = `
+                        <h3>✅ Processing Complete!</h3>
+                        <p>Your video is ready for download:</p>
+                        <a href="/download/${data.output_file}" class="download-btn" download>
+                            ⬇️ Download Video
+                        </a>
+                    `;
+                    result.classList.remove('hidden');
+                } else {
+                    error.textContent = data.error || 'An error occurred';
+                    error.classList.remove('hidden');
+                }
+            } catch (err) {
+                progress.classList.add('hidden');
+                submitBtn.disabled = false;
+                error.textContent = 'Network error: ' + err.message;
+                error.classList.remove('hidden');
+            }
+        });
+    </script>
+</body>
+</html>
