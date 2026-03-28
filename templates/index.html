@@ -17,6 +17,18 @@
                 <input type="file" id="video" name="video" accept="video/*" required>
             </div>
             
+            <div id="previewSection" class="hidden">
+                <div class="preview-video">
+                    <video id="videoPlayer" controls></video>
+                </div>
+                <div class="video-info">
+                    <span class="info-badge" id="infoSize">📦 -- MB</span>
+                    <span class="info-badge" id="infoResolution">📐 --x--</span>
+                    <span class="info-badge" id="infoFps">🎬 -- FPS</span>
+                    <span class="info-badge" id="infoDuration">⏱️ -- sec</span>
+                </div>
+            </div>
+            
             <div class="form-group">
                 <label>Target Resolution</label>
                 <select name="resolution" id="resolution" required>
@@ -108,12 +120,55 @@
     
     <script>
         const form = document.getElementById('uploadForm');
+        const videoInput = document.getElementById('video');
+        const previewSection = document.getElementById('previewSection');
+        const videoPlayer = document.getElementById('videoPlayer');
         const progress = document.getElementById('progress');
         const result = document.getElementById('result');
         const error = document.getElementById('error');
         const submitBtn = document.getElementById('submitBtn');
         const historyList = document.getElementById('historyList');
         const deleteAllBtn = document.getElementById('deleteAllBtn');
+        
+        // Handle file selection - probe and preview
+        videoInput.addEventListener('change', async () => {
+            const file = videoInput.files[0];
+            if (!file) return;
+            
+            // Show local preview using object URL
+            const url = URL.createObjectURL(file);
+            videoPlayer.src = url;
+            
+            // Reset info badges
+            document.getElementById('infoSize').textContent = '📦 -- MB';
+            document.getElementById('infoResolution').textContent = '📐 --x--';
+            document.getElementById('infoFps').textContent = '🎬 -- FPS';
+            document.getElementById('infoDuration').textContent = '⏱️ -- sec';
+            
+            previewSection.classList.remove('hidden');
+            
+            // Probe server for actual info
+            const formData = new FormData();
+            formData.append('video', file);
+            
+            try {
+                const response = await fetch('/probe', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (response.ok && data.size) {
+                    const sizeMB = (data.size / 1024 / 1024).toFixed(2);
+                    document.getElementById('infoSize').textContent = `📦 ${sizeMB} MB`;
+                    document.getElementById('infoResolution').textContent = `📐 ${data.width}x${data.height}`;
+                    document.getElementById('infoFps').textContent = `🎬 ${data.fps} FPS`;
+                    document.getElementById('infoDuration').textContent = `⏱️ ${data.duration} sec`;
+                }
+            } catch (err) {
+                console.log('Probe failed:', err);
+            }
+        });
         
         form.addEventListener('submit', async (e) => {
             e.preventDefault();

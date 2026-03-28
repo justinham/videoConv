@@ -40,6 +40,74 @@ def remove_from_history(filename):
 def clear_history():
     save_history([])
 
+@app.route('/probe', methods=['POST'])
+def probe():
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file'}), 400
+    
+    file = request.files['video']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    # Save temp file
+    filename = str(uuid.uuid4())
+    ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else 'mp4'
+    temp_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{filename}.{ext}")
+    file.save(temp_path)
+    
+    try:
+        # Get video info with ffprobe
+        cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height,r_frame_rate,nb_frames',
+            '-show_entries', 'format=duration,size',
+            '-of', 'json',
+            temp_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode != 0:
+            return jsonify({'error': 'Failed to probe video'}), 500
+        
+        import json as json_lib
+        data = json_lib.loads(result.stdout)
+        
+        # Parse streams
+        stream = data.get('streams', [{}])[0]
+        width = stream.get('width', 0)
+        height = stream.get('height', 0)
+        fps_str = stream.get('r_frame_rate', '0/1')
+        
+        # Parse FPS fraction
+        if '/' in fps_str:
+            num, den = fps_str.split('/')
+            fps = round(int(num) / int(den)) if int(den) != 0 else 0
+        else:
+            fps = int(fps_str)
+        
+        # Parse format
+        fmt = data.get('format', {})
+        duration = float(fmt.get('duration', 0))
+        size = int(fmt.get('size', 0))
+        
+        # Clean up temp file
+        os.remove(temp_path)
+        
+        return jsonify({
+            'width': width,
+            'height': height,
+            'fps': fps,
+            'duration': round(duration, 2),
+            'size': size
+        })
+        
+    except Exception as e:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/')
 def index():
     history = load_history()
