@@ -1,12 +1,15 @@
 import os
 import subprocess
 import uuid
+import json
 from flask import Flask, render_template, request, send_file, jsonify
 from werkzeug.utils import secure_filename
+from datetime import datetime
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['OUTPUT_FOLDER'] = 'outputs'
+app.config['HISTORY_FILE'] = 'history.json'
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024  # 10GB max
 
 ALLOWED_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'}
@@ -14,9 +17,33 @@ ALLOWED_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def load_history():
+    if os.path.exists(app.config['HISTORY_FILE']):
+        with open(app.config['HISTORY_FILE'], 'r') as f:
+            return json.load(f)
+    return []
+
+def save_history(history):
+    with open(app.config['HISTORY_FILE'], 'w') as f:
+        json.dump(history, f)
+
+def add_to_history(entry):
+    history = load_history()
+    history.insert(0, entry)  # Add newest first
+    save_history(history)
+
+def remove_from_history(filename):
+    history = load_history()
+    history = [h for h in history if h['output_file'] != filename]
+    save_history(history)
+
+def clear_history():
+    save_history([])
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    history = load_history()
+    return render_template('index.html', history=history)
 
 @app.route('/process', methods=['POST'])
 def process():
@@ -42,6 +69,7 @@ def process():
         return jsonify({'error': 'Invalid FPS value'}), 400
     
     width, height = resolution.split('x')
+    original_filename = file.filename
     
     # Save uploaded file
     filename = str(uuid.uuid4())
@@ -86,6 +114,19 @@ def process():
         if os.path.exists(input_path):
             os.remove(input_path)
         
+        # Add to history
+        file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+        entry = {
+            'output_file': f"{filename}_output.mp4",
+            'original_name': original_filename,
+            'resolution': resolution,
+            'fps': fps,
+            'hardware': hardware,
+            'timestamp': datetime.now().isoformat(),
+            'size': file_size
+        }
+        add_to_history(entry)
+        
         return jsonify({
             'success': True,
             'output_file': f"{filename}_output.mp4"
@@ -107,6 +148,35 @@ def download(filename):
     if not os.path.exists(path):
         return jsonify({'error': 'File not found'}), 404
     return send_file(path, as_attachment=True)
+
+@app.route('/delete/<filename>', methods=['POST'])
+def delete(filename):
+    safe_filename = secure_filename(filename)
+    path = os.path.join(app.config['OUTPUT_FOLDER'], safe_filename)
+    
+    # Remove from filesystem
+    if os.path.exists(path):
+        os.remove(path)
+    
+    # Remove from history
+    remove_from_history(safe_filename)
+    
+    return jsonify({'success': True})
+
+@app.route('/delete-all', methods=['POST'])
+def delete_all():
+    history = load_history()
+    
+    # Remove all files from filesystem
+    for entry in history:
+        path = os.path.join(app.config['OUTPUT_FOLDER'], entry['output_file'])
+        if os.path.exists(path):
+            os.remove(path)
+    
+    # Clear history
+    clear_history()
+    
+    return jsonify({'success': True})
 
 if __name__ == '__main__':
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)

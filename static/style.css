@@ -14,7 +14,7 @@ body {
 
 .container {
     max-width: 600px;
-    margin: 0 auto;
+    margin: 0 auto 2rem;
     background: rgba(255, 255, 255, 0.05);
     border-radius: 16px;
     padding: 2rem;
@@ -26,6 +26,11 @@ h1 {
     text-align: center;
     margin-bottom: 0.5rem;
     font-size: 2rem;
+}
+
+h2 {
+    font-size: 1.25rem;
+    margin-bottom: 0;
 }
 
 .subtitle {
@@ -214,4 +219,100 @@ button[type="submit"]:disabled {
     border-radius: 8px;
     margin-top: 1rem;
     color: #ff6b6b;
+}
+
+/* History Section */
+#historySection {
+    margin-top: 2rem;
+}
+
+.history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.btn-danger {
+    padding: 0.5rem 1rem;
+    background: rgba(244, 67, 54, 0.2);
+    color: #ff6b6b;
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-danger:hover {
+    background: rgba(244, 67, 54, 0.3);
+}
+
+.history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+}
+
+.history-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.history-name {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 0.25rem;
+}
+
+.history-details {
+    font-size: 0.8rem;
+    color: #888;
+}
+
+.history-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-left: 1rem;
+}
+
+.btn-download {
+    padding: 0.5rem 1rem;
+    background: #4a90d9;
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.btn-download:hover {
+    background: #357abd;
+}
+
+.btn-delete {
+    padding: 0.5rem 0.75rem;
+    background: rgba(244, 67, 54, 0.2);
+    color: #ff6b6b;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.btn-delete:hover {
+    background: rgba(244, 67, 54, 0.4);
+}
+
+.empty-history {
+    text-align: center;
+    color: #666;
+    padding: 2rem;
 }

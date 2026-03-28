@@ -73,12 +73,47 @@
         <div id="error" class="hidden"></div>
     </div>
     
+    <div class="container" id="historySection">
+        <div class="history-header">
+            <h2>📜 History</h2>
+            <button type="button" id="deleteAllBtn" class="btn-danger">🗑️ Delete All</button>
+        </div>
+        
+        <div id="historyList">
+            {% if history %}
+                {% for item in history %}
+                <div class="history-item" data-filename="{{ item.output_file }}">
+                    <div class="history-info">
+                        <div class="history-name">{{ item.original_name }}</div>
+                        <div class="history-details">
+                            {{ item.resolution }} • {{ item.fps }} FPS • 
+                            {% if item.hardware == 'cpu' %}🖥️ CPU
+                            {% elif item.hardware == 'mac' %}🍎 Mac GPU
+                            {% elif item.hardware == 'nvidia' %}🎮 NVIDIA GPU{% endif %}
+                            • {{ (item.size / 1024 / 1024)|round(2) }} MB
+                            • {{ item.timestamp[:19]|replace('T', ' ') }}
+                        </div>
+                    </div>
+                    <div class="history-actions">
+                        <a href="/download/{{ item.output_file }}" class="btn-download" download>⬇️ Download</a>
+                        <button type="button" class="btn-delete" data-filename="{{ item.output_file }}">🗑️</button>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p class="empty-history">No videos processed yet</p>
+            {% endif %}
+        </div>
+    </div>
+    
     <script>
         const form = document.getElementById('uploadForm');
         const progress = document.getElementById('progress');
         const result = document.getElementById('result');
         const error = document.getElementById('error');
         const submitBtn = document.getElementById('submitBtn');
+        const historyList = document.getElementById('historyList');
+        const deleteAllBtn = document.getElementById('deleteAllBtn');
         
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -111,6 +146,8 @@
                         </a>
                     `;
                     result.classList.remove('hidden');
+                    // Refresh page to show new history item
+                    setTimeout(() => location.reload(), 1500);
                 } else {
                     error.textContent = data.error || 'An error occurred';
                     error.classList.remove('hidden');
@@ -122,6 +159,45 @@
                 error.classList.remove('hidden');
             }
         });
+        
+        // Delete single item
+        document.querySelectorAll('.btn-delete').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const filename = btn.dataset.filename;
+                if (!confirm('Delete this video?')) return;
+                
+                try {
+                    const response = await fetch(`/delete/${filename}`, { method: 'POST' });
+                    if (response.ok) {
+                        btn.closest('.history-item').remove();
+                        checkEmptyHistory();
+                    }
+                } catch (err) {
+                    alert('Delete failed: ' + err.message);
+                }
+            });
+        });
+        
+        // Delete all
+        deleteAllBtn.addEventListener('click', async () => {
+            if (!confirm('Delete ALL videos? This cannot be undone.')) return;
+            
+            try {
+                const response = await fetch('/delete-all', { method: 'POST' });
+                if (response.ok) {
+                    historyList.innerHTML = '<p class="empty-history">No videos processed yet</p>';
+                }
+            } catch (err) {
+                alert('Delete all failed: ' + err.message);
+            }
+        });
+        
+        function checkEmptyHistory() {
+            const items = document.querySelectorAll('.history-item');
+            if (items.length === 0) {
+                historyList.innerHTML = '<p class="empty-history">No videos processed yet</p>';
+            }
+        }
     </script>
 </body>
 </html>
