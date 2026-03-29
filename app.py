@@ -2,6 +2,7 @@ import os
 import subprocess
 import uuid
 import json
+import threading
 from flask import Flask, render_template, request, send_file, jsonify
 from werkzeug.utils import secure_filename
 from datetime import datetime
@@ -14,8 +15,28 @@ app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024  # 10GB max
 
 ALLOWED_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'}
 
+# Job tracking
+jobs = {}
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def get_video_duration(path):
+    """Get video duration in seconds using ffprobe."""
+    try:
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'csv=p=0', path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            return float(result.stdout.strip())
+    except:
+        pass
+    return 0
+
 
 def load_history():
     if os.path.exists(app.config['HISTORY_FILE']):
@@ -113,6 +134,7 @@ def index():
     history = load_history()
     return render_template('index.html', history=history)
 
+
 @app.route('/process', methods=['POST'])
 def process():
     if 'video' not in request.files:
@@ -147,6 +169,9 @@ def process():
     
     file.save(input_path)
     
+    # Get input duration for progress calculation
+    input_duration = get_video_duration(input_path)
+    
     # Build ffmpeg command based on hardware choice
     if hardware == 'cpu':
         video_codec = 'libx264'
@@ -157,58 +182,110 @@ def process():
     else:
         return jsonify({'error': 'Invalid hardware option'}), 400
     
-    cmd = [
-        'ffmpeg',
-        '-i', input_path,
-        '-r', str(fps),
-        '-vf', f'scale={width}:{height}',
-        '-c:v', video_codec,
-        '-crf', '23',
-        '-c:a', 'copy',
-        '-y',  # Overwrite output
-        output_path
-    ]
+    # Create job
+    job_id = filename
+    jobs[job_id] = {
+        'status': 'processing',
+        'progress': 0,
+        'message': 'Starting...',
+        'output_file': None,
+        'error': None
+    }
     
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    def run_ffmpeg():
+        # FFmpeg command with progress output
+        cmd = [
+            'ffmpeg',
+            '-i', input_path,
+            '-r', str(fps),
+            '-vf', f'scale={width}:{height}',
+            '-c:v', video_codec,
+            '-crf', '23',
+            '-c:a', 'copy',
+            '-progress', 'pipe:1',  # Output progress to stdout
+            '-y',
+            output_path
+        ]
         
-        if result.returncode != 0:
-            # Clean up input
+        try:
+            jobs[job_id]['message'] = 'Processing frames...'
+            
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            # Parse progress output
+            for line in proc.stdout:
+                line = line.strip()
+                if line.startswith('out_time_ms='):
+                    # Parse time in milliseconds
+                    try:
+                        time_ms = int(line.split('=')[1])
+                        time_sec = time_ms / 1000000.0
+                        if input_duration > 0:
+                            progress = min(int((time_sec / input_duration) * 100), 99)
+                            jobs[job_id]['progress'] = progress
+                    except:
+                        pass
+                elif line.startswith('progress=end'):
+                    jobs[job_id]['progress'] = 100
+            
+            proc.wait()
+            
+            if proc.returncode != 0:
+                _, stderr = proc.communicate()
+                jobs[job_id]['status'] = 'failed'
+                jobs[job_id]['error'] = f'FFmpeg error: {stderr[-500:]}'
+            else:
+                jobs[job_id]['status'] = 'completed'
+                jobs[job_id]['progress'] = 100
+                jobs[job_id]['message'] = 'Complete!'
+                
+                # Add to history
+                file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+                entry = {
+                    'output_file': f"{filename}_output.mp4",
+                    'original_name': original_filename,
+                    'resolution': resolution,
+                    'fps': fps,
+                    'hardware': hardware,
+                    'timestamp': datetime.now().isoformat(),
+                    'size': file_size
+                }
+                add_to_history(entry)
+                jobs[job_id]['output_file'] = f"{filename}_output.mp4"
+                
+        except Exception as e:
+            jobs[job_id]['status'] = 'failed'
+            jobs[job_id]['error'] = str(e)
+        finally:
+            # Clean up input file
             if os.path.exists(input_path):
                 os.remove(input_path)
-            return jsonify({'error': f'FFmpeg error: {result.stderr[-500:]}'}), 500
-        
-        # Clean up input file
-        if os.path.exists(input_path):
-            os.remove(input_path)
-        
-        # Add to history
-        file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-        entry = {
-            'output_file': f"{filename}_output.mp4",
-            'original_name': original_filename,
-            'resolution': resolution,
-            'fps': fps,
-            'hardware': hardware,
-            'timestamp': datetime.now().isoformat(),
-            'size': file_size
-        }
-        add_to_history(entry)
-        
-        return jsonify({
-            'success': True,
-            'output_file': f"{filename}_output.mp4",
-            'size': file_size
-        })
-        
-    except subprocess.TimeoutExpired:
-        if os.path.exists(input_path):
-            os.remove(input_path)
-        return jsonify({'error': 'Processing timed out (max 1 hour)'}), 500
-    except Exception as e:
-        if os.path.exists(input_path):
-            os.remove(input_path)
-        return jsonify({'error': str(e)}), 500
+    
+    # Run in background thread
+    thread = threading.Thread(target=run_ffmpeg)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        'job_id': job_id,
+        'status': 'started'
+    })
+
+
+@app.route('/status/<job_id>')
+def status(job_id):
+    if job_id not in jobs:
+        return jsonify({'error': 'Job not found'}), 404
+    
+    job = jobs[job_id]
+    return jsonify({
+        'status': job['status'],
+        'progress': job['progress'],
+        'message': job['message'],
+        'output_file': job.get('output_file'),
+        'error': job.get('error')
+    })
+
 
 @app.route('/download/<filename>')
 def download(filename):

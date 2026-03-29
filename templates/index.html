@@ -52,7 +52,7 @@
             
             <div class="form-group">
                 <label for="fps">Target FPS</label>
-                <input type="number" id="fps" name="fps" value="30" min="1" max="240" required>
+                <input type="number" id="fps" name="fps" value="20" min="1" max="240" required>
                 <small>Frames per second (1-240)</small>
             </div>
             
@@ -81,8 +81,15 @@
         </form>
         
         <div id="progress" class="hidden">
-            <div class="spinner"></div>
-            <p>Processing video...</p>
+            <div class="progress-wrapper">
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+                <div class="progress-text">
+                    <span id="progressPercent">0%</span>
+                    <span id="progressMessage">Starting...</span>
+                </div>
+            </div>
             <p class="progress-note">This may take a while for large files</p>
         </div>
         
@@ -185,6 +192,11 @@
             progress.classList.remove('hidden');
             submitBtn.disabled = true;
             
+            // Reset progress bar
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressPercent').textContent = '0%';
+            document.getElementById('progressMessage').textContent = 'Starting...';
+            
             const formData = new FormData(form);
             
             try {
@@ -195,73 +207,57 @@
                 
                 const data = await response.json();
                 
-                progress.classList.add('hidden');
-                submitBtn.disabled = false;
-                
-                if (response.ok && data.success) {
-                    const sizeMB = (data.size / 1024 / 1024).toFixed(2);
-                    result.innerHTML = `
-                        <h3>✅ Processing Complete!</h3>
-                        <p>Your video is ready for download:</p>
-                        <p class="file-size">📦 ${sizeMB} MB</p>
-                        <a href="/download/${data.output_file}" class="download-btn" download>
-                            ⬇️ Download Video
-                        </a>
-                    `;
-                    result.classList.remove('hidden');
-                    
-                    // Dynamically add to history without reload
-                    const historyList = document.getElementById('historyList');
-                    const emptyMsg = historyList.querySelector('.empty-history');
-                    if (emptyMsg) emptyMsg.remove();
-                    
-                    const now = new Date();
-                    const timestamp = now.toISOString().replace('T', ' ').slice(0, 19);
-                    const hwLabel = form.querySelector('input[name="hardware"]:checked').value;
-                    const hwIcon = hwLabel === 'cpu' ? '🖥️ CPU' : hwLabel === 'mac' ? '🍎 Mac GPU' : '🎮 NVIDIA GPU';
-                    const resolution = form.querySelector('#resolution').value;
-                    
-                    const newItem = document.createElement('div');
-                    newItem.className = 'history-item';
-                    newItem.dataset.filename = data.output_file;
-                    newItem.innerHTML = `
-                        <div class="history-info">
-                            <div class="history-name">${form.querySelector('#video').files[0]?.name || 'video'}</div>
-                            <div class="history-details">
-                                ${resolution} • ${form.querySelector('#fps').value} FPS • ${hwIcon} • ${sizeMB} MB • ${timestamp}
-                            </div>
-                        </div>
-                        <div class="history-actions">
-                            <a href="/download/${data.output_file}" class="btn-download" download>⬇️ Download</a>
-                            <button type="button" class="btn-delete" data-filename="${data.output_file}">🗑️</button>
-                        </div>
-                    `;
-                    historyList.insertBefore(newItem, historyList.firstChild);
-                    
-                    // Re-attach delete handler to new item
-                    newItem.querySelector('.btn-delete').addEventListener('click', async () => {
-                        const filename = newItem.dataset.filename;
-                        if (!confirm('Delete this video?')) return;
-                        try {
-                            const resp = await fetch(`/delete/${filename}`, { method: 'POST' });
-                            if (resp.ok) {
-                                newItem.remove();
-                                if (historyList.children.length === 0) {
-                                    historyList.innerHTML = '<p class="empty-history">No videos processed yet</p>';
-                                }
-                            }
-                        } catch (err) {
-                            alert('Delete failed: ' + err.message);
-                        }
-                    });
-                } else {
-                    error.textContent = data.error || 'An error occurred';
-                    error.classList.remove('hidden');
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to start processing');
                 }
+                
+                const jobId = data.job_id;
+                
+                // Poll for progress
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const statusResp = await fetch(`/status/${jobId}`);
+                        const statusData = await statusResp.json();
+                        
+                        document.getElementById('progressBar').style.width = `${statusData.progress}%`;
+                        document.getElementById('progressPercent').textContent = `${statusData.progress}%`;
+                        document.getElementById('progressMessage').textContent = statusData.message;
+                        
+                        if (statusData.status === 'completed') {
+                            clearInterval(pollInterval);
+                            
+                            const sizeMB = (statusData.size / 1024 / 1024).toFixed(2);
+                            result.innerHTML = `
+                                <h3>✅ Processing Complete!</h3>
+                                <p>Your video is ready for download:</p>
+                                <p class="file-size">📦 ${sizeMB} MB</p>
+                                <a href="/download/${statusData.output_file}" class="download-btn" download>
+                                    ⬇️ Download Video
+                                </a>
+                            `;
+                            result.classList.remove('hidden');
+                            progress.classList.add('hidden');
+                            submitBtn.disabled = false;
+                            
+                            // Refresh page to update history
+                            setTimeout(() => location.reload(), 1500);
+                            
+                        } else if (statusData.status === 'failed') {
+                            clearInterval(pollInterval);
+                            error.textContent = statusData.error || 'Processing failed';
+                            error.classList.remove('hidden');
+                            progress.classList.add('hidden');
+                            submitBtn.disabled = false;
+                        }
+                    } catch (err) {
+                        console.error('Poll error:', err);
+                    }
+                }, 500);
+                
             } catch (err) {
                 progress.classList.add('hidden');
                 submitBtn.disabled = false;
-                error.textContent = 'Network error: ' + err.message;
+                error.textContent = err.message;
                 error.classList.remove('hidden');
             }
         });
