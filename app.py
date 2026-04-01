@@ -30,7 +30,7 @@ def get_video_duration(path):
             '-show_entries', 'format=duration',
             '-of', 'csv=p=0', path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
             return float(result.stdout.strip())
     except:
@@ -193,6 +193,9 @@ def process():
     }
     
     def run_ffmpeg():
+        import threading
+        import time
+
         # FFmpeg command with progress output
         cmd = [
             'ffmpeg',
@@ -206,17 +209,41 @@ def process():
             '-y',
             output_path
         ]
-        
+
+        # Timeout: 2x video duration, minimum 5 min, maximum 2 hours
+        timeout_sec = max(300, min(int(input_duration * 2) + 60, 7200))
+
         try:
             jobs[job_id]['message'] = 'Processing frames...'
-            
+
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            
-            # Parse progress output
+
+            # stderr draining thread — prevents buffer deadlock
+            stderr_lines = []
+            def drain_stderr():
+                for line in proc.stderr:
+                    stderr_lines.append(line)
+            stderr_thread = threading.Thread(target=drain_stderr, daemon=True)
+            stderr_thread.start()
+
+            # Timeout watchdog thread
+            def watchdog():
+                start = time.time()
+                while time.time() - start < timeout_sec:
+                    if proc.poll() is not None:
+                        return  # process already finished
+                    time.sleep(2)
+                # Timed out — kill the process
+                proc.kill()
+                proc.wait()
+
+            watchdog_thread = threading.Thread(target=watchdog, daemon=True)
+            watchdog_thread.start()
+
+            # Parse progress output from stdout
             for line in proc.stdout:
                 line = line.strip()
                 if line.startswith('out_time_ms='):
-                    # Parse time in milliseconds
                     try:
                         time_ms = int(line.split('=')[1])
                         time_sec = time_ms / 1000000.0
@@ -227,18 +254,20 @@ def process():
                         pass
                 elif line.startswith('progress=end'):
                     jobs[job_id]['progress'] = 100
-            
+
             proc.wait()
-            
+            stderr_thread.join(timeout=2)
+
             if proc.returncode != 0:
-                _, stderr = proc.communicate()
+                # Collect final stderr
+                stderr_msg = ''.join(stderr_lines)[-500:]
                 jobs[job_id]['status'] = 'failed'
-                jobs[job_id]['error'] = f'FFmpeg error: {stderr[-500:]}'
+                jobs[job_id]['error'] = f'FFmpeg error (code {proc.returncode}): {stderr_msg}'
             else:
                 jobs[job_id]['status'] = 'completed'
                 jobs[job_id]['progress'] = 100
                 jobs[job_id]['message'] = 'Complete!'
-                
+
                 # Add to history
                 file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
                 entry = {
@@ -252,7 +281,7 @@ def process():
                 }
                 add_to_history(entry)
                 jobs[job_id]['output_file'] = f"{filename}_output.mp4"
-                
+
         except Exception as e:
             jobs[job_id]['status'] = 'failed'
             jobs[job_id]['error'] = str(e)
@@ -293,7 +322,23 @@ def download(filename):
     path = os.path.join(app.config['OUTPUT_FOLDER'], safe_filename)
     if not os.path.exists(path):
         return jsonify({'error': 'File not found'}), 404
-    return send_file(path, as_attachment=True)
+
+    # Look up the original filename from history
+    history = load_history()
+    original_name = None
+    for entry in history:
+        if entry['output_file'] == safe_filename:
+            original_name = entry['original_name']
+            break
+
+    # Use original name with _processed suffix, or fall back to stored name
+    if original_name:
+        base, ext = os.path.splitext(original_name)
+        download_name = f"{base}_processed.mp4"
+    else:
+        download_name = safe_filename
+
+    return send_file(path, as_attachment=True, download_name=download_name)
 
 @app.route('/delete/<filename>', methods=['POST'])
 def delete(filename):
